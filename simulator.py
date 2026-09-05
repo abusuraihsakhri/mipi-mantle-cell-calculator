@@ -1,9 +1,9 @@
 """
 Distributed Component High-Throughput Traffic & Stress Testing Simulator for Mipi Mantle Cell Calculator.
 """
-import time
 import random
 import sys
+import time
 from agents.models import SystemTaskPayload
 from agents.supervisor import SystemSupervisor
 from agents.base import PHIGuard, SecurityException, AuditLogger

@@ -4,12 +4,25 @@ Command Line Interface for Mipi Mantle Cell Calculator.
 import argparse
 import csv
 import json
+import os
 import sys
 from agents.models import SystemTaskPayload
 from agents.supervisor import SystemSupervisor
 from agents.base import AuditLogger
 
 supervisor = SystemSupervisor(model_provider="mock")
+
+
+def _validate_safe_path(path: str) -> str:
+    """Validate that a file path does not contain path traversal attempts."""
+    # Reject paths with null bytes
+    if "\x00" in path:
+        raise ValueError("Path contains null bytes")
+    # Resolve to absolute path and check for traversal markers
+    normalized = os.path.normpath(path)
+    if ".." in normalized.split(os.sep):
+        raise ValueError(f"Path traversal detected in: {path}")
+    return normalized
 
 
 def main(argv=None):
@@ -80,10 +93,19 @@ def main(argv=None):
         return 0
 
     if args.command == "batch":
-        with open(args.input, mode="r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames or [])
-            rows = list(reader)
+        input_path = _validate_safe_path(args.input)
+        output_path = _validate_safe_path(args.output)
+        try:
+            with open(input_path, mode="r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                fieldnames = list(reader.fieldnames or [])
+                rows = list(reader)
+        except FileNotFoundError:
+            print(f"Error: Input file not found: {input_path}", file=sys.stderr)
+            return 1
+        except (csv.Error, UnicodeDecodeError) as e:
+            print(f"Error: Failed to parse input CSV: {e}", file=sys.stderr)
+            return 1
 
         out_fields = fieldnames + ["overall_urgency", "integrity_status", "total_alerts", "audit_hash"]
         out_rows = []
@@ -104,11 +126,11 @@ def main(argv=None):
             row_dict["audit_hash"] = dossier.audit_hash
             out_rows.append(row_dict)
 
-        with open(args.output, mode="w", encoding="utf-8", newline="") as f:
+        with open(output_path, mode="w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=out_fields)
             writer.writeheader()
             writer.writerows(out_rows)
-        print(f"Processed {len(out_rows)} records -> {args.output}")
+        print(f"Processed {len(out_rows)} records -> {output_path}")
         return 0
 
     if args.command == "serve":
