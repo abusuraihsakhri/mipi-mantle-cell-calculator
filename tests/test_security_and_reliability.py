@@ -105,3 +105,11 @@ class TestAuditTrailSecurity:
         trail.log("actor1", "tier1", "EVENT1", {"a": 1})
         trail.log("actor2", "tier2", "EVENT2", {"b": 2})
         assert trail.verify_integrity() is True
+
+
+def test_hmac_detects_modified_record():
+    trail = AuditTrail(secret_key="test-key-for-tamper-detection")
+    trail.log("a", "b", "EVENT", {"x": 1})
+    assert trail.verify_integrity()
+    trail.logs[0]["event_type"] = "MUTATED"
+    assert not trail.verify_integrity()
