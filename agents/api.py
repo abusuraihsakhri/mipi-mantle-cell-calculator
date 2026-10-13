@@ -53,3 +53,23 @@ def api_chat(req: ChatRequest):
 @app.get("/api/audit/logs")
 def api_audit_logs():
     return {"audit_trail": AuditLogger.get_trail(), "verified": AuditLogger.verify_integrity()}
+
+
+# Clinical prognostic scoring is separate from the legacy diagnostic supervisor.
+class MIPIRequest(BaseModel):
+    age: float
+    ecog: int
+    wbc: float  # 10^9/L
+    ldh: float | None = None
+    ldh_uln: float | None = None
+    ldh_ratio: float | None = None
+    ki67: float | None = None
+
+
+@app.post("/api/mipi")
+def api_mipi(request: MIPIRequest):
+    from mipi_calc import calculate_metrics
+    try:
+        return calculate_metrics(**request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
