@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Mipi Mantle Cell Calculator API",
-    "description": "Enterprise Distributed Component Platform (Clinical & Cryptographic AI) adhering to CAP / CLSI / NIST Standards.",
+    "description": "Clinical MIPI scoring endpoint plus token-protected legacy supervisor endpoints. /openapi.json on the running server is authoritative.",
     "version": "3.0.0-ENTERPRISE",
     "contact": {
       "name": "Dr. Abu Suraih Sakhri",
@@ -71,7 +71,12 @@
           "200": {
             "description": "Consensus dossier with HMAC signature"
           }
-        }
+        },
+        "security": [
+          {
+            "AuditToken": []
+          }
+        ]
       }
     },
     "/api/chat": {
@@ -98,7 +103,12 @@
           "200": {
             "description": "Supervisory response"
           }
-        }
+        },
+        "security": [
+          {
+            "AuditToken": []
+          }
+        ]
       }
     },
     "/api/audit/logs": {
@@ -108,7 +118,81 @@
           "200": {
             "description": "Cryptographic audit trail"
           }
+        },
+        "security": [
+          {
+            "AuditToken": []
+          }
+        ]
+      }
+    },
+    "/api/mipi": {
+      "post": {
+        "summary": "Calculate original, simplified and optional biological MIPI",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "age",
+                  "ecog",
+                  "wbc"
+                ],
+                "properties": {
+                  "age": {
+                    "type": "number",
+                    "description": "Years (18–120)"
+                  },
+                  "ecog": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4
+                  },
+                  "wbc": {
+                    "type": "number",
+                    "description": "10^9/L"
+                  },
+                  "ldh": {
+                    "type": "number",
+                    "description": "Measured LDH, same units as ldh_uln"
+                  },
+                  "ldh_uln": {
+                    "type": "number",
+                    "description": "LDH upper reference limit"
+                  },
+                  "ldh_ratio": {
+                    "type": "number",
+                    "description": "LDH divided by ULN, alternative to ldh + ldh_uln"
+                  },
+                  "ki67": {
+                    "type": "number",
+                    "description": "Optional Ki-67 percent (0-100)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MIPI scores and risk groups"
+          },
+          "422": {
+            "description": "Invalid clinical inputs"
+          }
         }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "AuditToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Audit-Token",
+        "description": "Requires matching server-side AUDIT_API_TOKEN; disabled if unset"
       }
     }
   }
