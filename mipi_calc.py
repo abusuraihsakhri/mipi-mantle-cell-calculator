@@ -72,6 +72,13 @@ def calculate_metrics(*, age: Any, ecog: Any, wbc: Any, ldh: Any = None,
     return result
 
 
+def _escape_spreadsheet(value: Any) -> Any:
+    """Prevent text fields from becoming formulas in spreadsheet programs."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def process_batch(input_csv: str, output_csv: str) -> int:
     """Process CSV with age,ecog,wbc and ldh_ratio or ldh,ldh_uln.
 
@@ -100,7 +107,7 @@ def process_batch(input_csv: str, output_csv: str) -> int:
                 results['error'] = ''
             except (ValueError, TypeError) as exc:
                 results = {'error': str(exc)}
-            outputs.append({**row, **results})
+            outputs.append({**{key: _escape_spreadsheet(val) for key, val in row.items()}, **results})
     out_fields = [*fields, *[k for k in ('score', 'classification', 'simplified_score',
         'simplified_classification', 'biological_score', 'biological_classification', 'error') if k not in fields]]
     with open(output_csv, 'w', encoding='utf-8', newline='') as f:
