@@ -65,3 +65,12 @@ def test_no_overwrite(tmp_path):
 def test_cli(capsys):
     assert main(['single', '--age', '60', '--ecog', '0', '--ldh-ratio', '1', '--wbc', '10']) == 0
     assert 'simplified_score' in capsys.readouterr().out
+
+
+def test_csv_spreadsheet_formula_escaped(tmp_path):
+    inp, out = tmp_path / 'input.csv', tmp_path / 'output.csv'
+    inp.write_text('Patient_ID,age,ecog,wbc,ldh_ratio\n=2+2,60,0,10,1\n', encoding='utf-8')
+    process_batch(str(inp), str(out))
+    with out.open(newline='') as handle:
+        record = next(csv.DictReader(handle))
+    assert record['Patient_ID'] == "'=2+2"
