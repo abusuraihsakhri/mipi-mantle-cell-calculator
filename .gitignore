@@ -54,3 +54,4 @@ Thumbs.db
 # Environment files
 .env
 .env.local
+\n# Local confidential CSV data and editor backups\n*.csv.bak\n

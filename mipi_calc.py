@@ -1,160 +1,149 @@
-#!/usr/bin/env python3
-"""
-MIPI Mantle Cell Lymphoma Prognostic Index
-Calculates standard and biological MIPI score from age, ECOG, LDH/ULN, and WBC count.
+"""Mantle Cell Lymphoma International Prognostic Index (MIPI).
 
-Zero-dependency Python implementation with single and batch evaluation.
-Author: Dr. Abu Suraih Sakhri
-License: MIT
+Original MIPI: Hoster et al., Blood 2008;111:558–565.
+Scores are prognostic groupings, not treatment recommendations.
 """
+from __future__ import annotations
 
 import argparse
 import csv
 import json
 import math
-import os
 import sys
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any
 
 
-def calculate_metrics(**kwargs) -> Dict[str, Any]:
-    """
-    Core domain algorithm for MIPI Mantle Cell Lymphoma Prognostic Index.
-
-    Accepts numeric parameters (e.g., v1, v2, v3) and computes a weighted score.
-    Each parameter after the first is weighted by 1/index to reduce its contribution.
-    """
-    params: Dict[str, Any] = {}
-    for k, v in kwargs.items():
-        if v is not None and v != "":
-            try:
-                params[k] = float(v)
-            except (ValueError, TypeError):
-                params[k] = str(v)
-
-    # Extract numeric values for scoring
-    numeric_vals = [val for val in params.values() if isinstance(val, (int, float))]
-
-    if not numeric_vals:
-        return {
-            "tool": "mipi-mantle-cell-calculator",
-            "score": 0.0,
-            "classification": "Unknown",
-            "clinical_recommendation": "Insufficient data for evaluation",
-            "inputs_evaluated": 0,
-            "warning": "No numeric inputs provided",
-        }
-
-    # Weighted scoring: first value has full weight, subsequent values decay by 1/n
-    score = numeric_vals[0]
-    for idx, nv in enumerate(numeric_vals[1:], start=2):
-        score += nv * (1.0 / idx)
-
-    # Guard against non-finite results (inf, nan from extreme inputs)
-    if not math.isfinite(score):
-        score = 0.0
-
-    rounded_score = round(score, 2)
-
-    # Classification / tiering based on clinical thresholds
-    if rounded_score < 10.0:
-        tier = "Low / Standard"
-        action = "Standard monitoring or negative cutoff"
-    elif rounded_score < 25.0:
-        tier = "Moderate / Intermediate"
-        action = "Close observation or secondary evaluation"
-    else:
-        tier = "High / Severe"
-        action = "Urgent clinical intervention or primary positive finding"
-
-    return {
-        "tool": "mipi-mantle-cell-calculator",
-        "score": rounded_score,
-        "classification": tier,
-        "clinical_recommendation": action,
-        "inputs_evaluated": len(params),
-    }
-
-
-def process_single(args) -> None:
-    kwargs = vars(args)
-    kwargs.pop("func", None)
-    res = calculate_metrics(**kwargs)
-    print(json.dumps(res, indent=2))
-
-
-def _validate_file_path(path: str) -> str:
-    """Validate that a file path does not contain path traversal attempts."""
-    if "\x00" in path:
-        raise ValueError("Path contains null bytes")
-    normalized = os.path.normpath(path)
-    if ".." in normalized.split(os.sep):
-        raise ValueError(f"Path traversal detected in: {path}")
-    return normalized
-
-
-def process_batch(input_csv: str, output_csv: str) -> None:
-    input_path = _validate_file_path(input_csv)
-    output_path = _validate_file_path(output_csv)
-
+def _number(name: str, value: Any, *, low: float, high: float, integer: bool = False) -> float:
+    if value is None or isinstance(value, bool) or (isinstance(value, str) and not value.strip()):
+        raise ValueError(f"{name} is required")
     try:
-        with open(input_path, mode="r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames or [])
-            rows = list(reader)
-    except FileNotFoundError:
-        print(f"Error: Input file not found: {input_path}", file=sys.stderr)
-        sys.exit(1)
-    except (csv.Error, UnicodeDecodeError) as e:
-        print(f"Error: Failed to parse input CSV: {e}", file=sys.stderr)
-        sys.exit(1)
+        num = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if not math.isfinite(num) or not low <= num <= high or (integer and not num.is_integer()):
+        raise ValueError(f"{name} must be {'an integer ' if integer else ''}between {low:g} and {high:g}")
+    return num
 
-    if not fieldnames:
-        print("Error: Input CSV is empty or has no headers", file=sys.stderr)
-        sys.exit(1)
 
-    out_fields = fieldnames + ["score", "classification", "clinical_recommendation"]
-    out_rows = []
+def calculate_metrics(*, age: Any, ecog: Any, wbc: Any, ldh: Any = None,
+                      ldh_uln: Any = None, ldh_ratio: Any = None,
+                      ki67: Any = None) -> dict[str, Any]:
+    """Calculate original, simplified and optional biological MIPI.
 
-    for r in rows:
-        calc_res = calculate_metrics(**r)
-        row_dict = dict(r)
-        row_dict["score"] = calc_res["score"]
-        row_dict["classification"] = calc_res["classification"]
-        row_dict["clinical_recommendation"] = calc_res["clinical_recommendation"]
-        out_rows.append(row_dict)
+    WBC is in 10^9/L (equivalently 10^3/µL); raw LDH/ULN must share units.
+    If ldh_ratio is given, neither ldh nor ldh_uln may be supplied.
+    Risk group comparisons use unrounded scores.
+    """
+    age_n = _number('age (years)', age, low=18, high=120)
+    ecog_n = int(_number('ECOG', ecog, low=0, high=4, integer=True))
+    wbc_n = _number('WBC (10^9/L)', wbc, low=0.001, high=1000)
+    if ldh_ratio is not None:
+        if ldh is not None or ldh_uln is not None:
+            raise ValueError('Supply either ldh_ratio or both ldh and ldh_uln')
+        ratio = _number('LDH/ULN', ldh_ratio, low=0.001, high=1000)
+    else:
+        ldh_n = _number('LDH', ldh, low=0.001, high=100000)
+        uln_n = _number('LDH ULN', ldh_uln, low=0.001, high=100000)
+        ratio = ldh_n / uln_n
+    ki67_n = None if ki67 is None or ki67 == '' else _number('Ki-67 (%)', ki67, low=0, high=100)
 
-    with open(output_path, mode="w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=out_fields)
+    # Original MIPI WBC term is per 10^6/L, i.e. 1000 × WBC(10^9/L).
+    score = (0.03535 * age_n + (0.6978 if ecog_n > 1 else 0.0)
+             + 1.367 * math.log10(ratio) + 0.9393 * math.log10(wbc_n * 1000))
+    risk = 'Low' if score < 5.7 else ('Intermediate' if score < 6.2 else 'High')
+    simplified = ((0 if age_n < 50 else 1 if age_n < 60 else 2 if age_n < 70 else 3)
+                  + (2 if ecog_n >= 2 else 0)
+                  + (0 if ratio < 0.67 else 1 if ratio < 1 else 2 if ratio < 1.5 else 3)
+                  + (0 if wbc_n < 6.7 else 1 if wbc_n < 10 else 2 if wbc_n < 15 else 3))
+    simple_risk = 'Low' if simplified <= 3 else ('Intermediate' if simplified <= 5 else 'High')
+    result: dict[str, Any] = {
+        'tool': 'mipi-mantle-cell-calculator', 'score': round(score, 4),
+        'classification': risk, 'simplified_score': simplified,
+        'simplified_classification': simple_risk,
+        'ldh_ratio': round(ratio, 6), 'inputs_evaluated': 4 + (ki67_n is not None),
+        'clinical_recommendation': 'Prognostic stratification only; interpret with a hematology specialist.',
+    }
+    if ki67_n is not None:
+        biological = score + 0.02142 * ki67_n
+        result['biological_score'] = round(biological, 4)
+        result['biological_classification'] = ('Low' if biological < 5.7 else
+                                                'Intermediate' if biological < 6.5 else 'High')
+    return result
+
+
+def _escape_spreadsheet(value: Any) -> Any:
+    """Prevent text fields from becoming formulas in spreadsheet programs."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
+def process_batch(input_csv: str, output_csv: str) -> int:
+    """Process CSV with age,ecog,wbc and ldh_ratio or ldh,ldh_uln.
+
+    Invalid records produce an error column instead of fabricated scores.
+    """
+    if Path(input_csv).resolve() == Path(output_csv).resolve():
+        raise ValueError('Input and output files must differ')
+    with open(input_csv, encoding='utf-8-sig', newline='') as f:
+        reader = csv.DictReader(f)
+        fields = list(reader.fieldnames or [])
+        if not fields or len(fields) != len(set(fields)):
+            raise ValueError('CSV must have nonempty, unique headers')
+        required = {'age', 'ecog', 'wbc'}
+        if not required.issubset(fields) or not ('ldh_ratio' in fields or {'ldh', 'ldh_uln'}.issubset(fields)):
+            raise ValueError('CSV requires age,ecog,wbc and ldh_ratio (or ldh and ldh_uln)')
+        outputs = []
+        for row in reader:
+            if None in row:
+                raise ValueError('CSV row has more columns than header')
+            kwargs = {k: row[k] for k in ('age', 'ecog', 'wbc', 'ldh', 'ldh_uln', 'ldh_ratio', 'ki67')
+                      if k in fields and row[k] not in ('', None)}
+            try:
+                result = calculate_metrics(**kwargs)
+                results = {k: result.get(k, '') for k in ('score', 'classification', 'simplified_score',
+                    'simplified_classification', 'biological_score', 'biological_classification')}
+                results['error'] = ''
+            except (ValueError, TypeError) as exc:
+                results = {'error': str(exc)}
+            outputs.append({**{key: _escape_spreadsheet(val) for key, val in row.items()}, **results})
+    out_fields = [*fields, *[k for k in ('score', 'classification', 'simplified_score',
+        'simplified_classification', 'biological_score', 'biological_classification', 'error') if k not in fields]]
+    with open(output_csv, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=out_fields, extrasaction='ignore')
         writer.writeheader()
-        writer.writerows(out_rows)
+        writer.writerows(outputs)
+    return len(outputs)
 
-    print(f"Processed {len(out_rows)} records -> {output_path}")
 
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="MIPI Mantle Cell Lymphoma Prognostic Index")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # Single parser
-    single_parser = subparsers.add_parser("single", help="Evaluate single case")
-    single_parser.add_argument("--v1", type=float, default=10.0, help="Primary parameter")
-    single_parser.add_argument("--v2", type=float, default=5.0, help="Secondary parameter")
-    single_parser.add_argument("--v3", type=float, default=2.0, help="Tertiary parameter")
-    single_parser.set_defaults(func=process_single)
-
-    # Batch parser
-    batch_parser = subparsers.add_parser("batch", help="Process batch CSV")
-    batch_parser.add_argument("-i", "--input", required=True, help="Input CSV")
-    batch_parser.add_argument("-o", "--output", default="results.csv", help="Output CSV")
-
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description='Mantle Cell Lymphoma International Prognostic Index')
+    sub = parser.add_subparsers(dest='command', required=True)
+    single = sub.add_parser('single', help='Calculate one case')
+    single.add_argument('--age', type=float, required=True, help='Years, 18–120')
+    single.add_argument('--ecog', type=int, required=True, help='ECOG 0–4')
+    single.add_argument('--wbc', type=float, required=True, help='WBC in 10^9/L')
+    ldh_group = single.add_mutually_exclusive_group(required=True)
+    ldh_group.add_argument('--ldh', type=float, help='LDH value; requires --ldh-uln')
+    ldh_group.add_argument('--ldh-ratio', type=float, help='LDH / laboratory ULN')
+    single.add_argument('--ldh-uln', type=float, help='Laboratory upper limit of normal for LDH')
+    single.add_argument('--ki67', type=float, help='Optional Ki-67 index (%)')
+    batch = sub.add_parser('batch', help='Score local CSV (no network transmission)')
+    batch.add_argument('-i', '--input', required=True)
+    batch.add_argument('-o', '--output', default='results.csv')
     args = parser.parse_args(argv)
+    try:
+        if args.command == 'single':
+            print(json.dumps(calculate_metrics(age=args.age, ecog=args.ecog, wbc=args.wbc,
+                ldh=args.ldh, ldh_uln=args.ldh_uln, ldh_ratio=args.ldh_ratio, ki67=args.ki67), indent=2))
+        else:
+            print(f'Processed {process_batch(args.input, args.output)} rows into {args.output}')
+        return 0
+    except (ValueError, OSError, csv.Error) as exc:
+        print(f'Error: {exc}', file=sys.stderr)
+        return 2
 
-    if args.command == "single":
-        args.func(args)
-    elif args.command == "batch":
-        process_batch(args.input, args.output)
 
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    sys.exit(main())

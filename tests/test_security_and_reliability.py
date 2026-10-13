@@ -6,92 +6,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from mipi_calc import calculate_metrics, _validate_file_path
+from mipi_calc import calculate_metrics, process_batch
 from agents.base import PHIGuard, SecurityException, AuditTrail
 
 
-class TestCalculateMetricsEdgeCases:
-    """Test calculate_metrics with edge cases and boundary conditions."""
+class TestClinicalInputs:
+    def test_missing_fields(self):
+        with pytest.raises(TypeError):
+            calculate_metrics()
 
-    def test_empty_input(self):
-        """Should handle no inputs gracefully."""
-        res = calculate_metrics()
-        assert res["score"] == 0.0
-        assert res["classification"] == "Unknown"
-        assert "warning" in res
+    def test_valid_risk(self):
+        result = calculate_metrics(age=60, ecog=0, wbc=10, ldh_ratio=1)
+        assert result["classification"] == "Intermediate"
 
-    def test_none_values_filtered(self):
-        """None values should be filtered out."""
-        res = calculate_metrics(v1=None, v2=None)
-        assert res["score"] == 0.0
-        assert res["classification"] == "Unknown"
+    def test_nonfinite_rejected(self):
+        with pytest.raises(ValueError):
+            calculate_metrics(age=60, ecog=0, wbc=float("inf"), ldh_ratio=1)
 
-    def test_empty_string_values_filtered(self):
-        """Empty string values should be filtered out."""
-        res = calculate_metrics(v1="", v2="")
-        assert res["score"] == 0.0
-
-    def test_single_value(self):
-        """Single numeric value should return that value as score."""
-        res = calculate_metrics(v1=15.0)
-        assert res["score"] == 15.0
-        assert res["classification"] == "Moderate / Intermediate"
-
-    def test_multiple_values_weighted(self):
-        """Multiple values should be weighted correctly."""
-        # score = 10 + 5*(1/2) + 2*(1/3) = 10 + 2.5 + 0.67 = 13.17
-        res = calculate_metrics(v1=10.0, v2=5.0, v3=2.0)
-        assert res["score"] == pytest.approx(13.17, abs=0.01)
-
-    def test_string_values_ignored_in_scoring(self):
-        """Non-numeric string values should not contribute to score."""
-        res = calculate_metrics(v1=10.0, name="test_patient")
-        assert res["score"] == 10.0
-        assert res["inputs_evaluated"] == 2
-
-    def test_classification_low(self):
-        """Score < 10 should be Low/Standard."""
-        res = calculate_metrics(v1=5.0)
-        assert res["classification"] == "Low / Standard"
-
-    def test_classification_moderate(self):
-        """Score 10-24.99 should be Moderate."""
-        res = calculate_metrics(v1=15.0)
-        assert res["classification"] == "Moderate / Intermediate"
-
-    def test_classification_high(self):
-        """Score >= 25 should be High/Severe."""
-        res = calculate_metrics(v1=30.0)
-        assert res["classification"] == "High / Severe"
-
-    def test_extreme_values_handled(self):
-        """Very large values should not cause overflow issues."""
-        res = calculate_metrics(v1=1e308, v2=1e308)
-        assert isinstance(res["score"], float)
-
-
-class TestPathValidation:
-    """Test file path validation for security."""
-
-    def test_normal_path_accepted(self):
-        """Normal file paths should be accepted."""
-        assert _validate_file_path("data.csv") == "data.csv"
-        assert _validate_file_path("output/results.csv") == "output\\results.csv"  # Windows
-
-    def test_path_traversal_rejected(self):
-        """Paths with .. should be rejected."""
-        with pytest.raises(ValueError, match="traversal"):
-            _validate_file_path("../etc/passwd")
-
-    def test_nested_traversal_rejected(self):
-        """Nested traversal paths should be rejected."""
-        with pytest.raises(ValueError, match="traversal"):
-            _validate_file_path("foo/../../../etc/passwd")
-
-    def test_null_byte_rejected(self):
-        """Paths with null bytes should be rejected."""
-        with pytest.raises(ValueError, match="null bytes"):
-            _validate_file_path("foo\x00bar.csv")
+    def test_duplicate_file_path_rejected(self, tmp_path):
+        path = tmp_path / "input.csv"
+        path.write_text("age,ecog,wbc,ldh_ratio\n60,0,10,1\n")
+        with pytest.raises(ValueError, match="differ"):
+            process_batch(str(path), str(path))
 
 
 class TestPHIGuard:
@@ -169,3 +105,11 @@ class TestAuditTrailSecurity:
         trail.log("actor1", "tier1", "EVENT1", {"a": 1})
         trail.log("actor2", "tier2", "EVENT2", {"b": 2})
         assert trail.verify_integrity() is True
+
+
+def test_hmac_detects_modified_record():
+    trail = AuditTrail(secret_key="test-key-for-tamper-detection")
+    trail.log("a", "b", "EVENT", {"x": 1})
+    assert trail.verify_integrity()
+    trail.logs[0]["event_type"] = "MUTATED"
+    assert not trail.verify_integrity()
