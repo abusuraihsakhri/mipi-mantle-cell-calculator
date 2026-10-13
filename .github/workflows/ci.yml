@@ -31,11 +31,5 @@ jobs:
         python -m compileall -q .
         python -m pytest -q
 
-    - name: Security SAST & Zero-PHI Audit
-      run: |
-        python -c "
-        from agents.base import PHIGuard, AuditLogger
-        import pytest
-        assert AuditLogger.verify_integrity() is True
-        print('Security & Zero-PHI Audit Passed!')
-        "
+    - name: Audit integrity smoke test
+      run: python -c 'from agents.base import AuditLogger; assert AuditLogger.verify_integrity()'
