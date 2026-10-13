@@ -36,9 +36,13 @@ dev = [
 ]
 
 [project.scripts]
-mipi-calc = "mipi_calc:main"\nmipi-supervisor = "cli:main"
+mipi-calc = "mipi_calc:main"
+mipi-supervisor = "cli:main"
 
-[tool.setuptools]\npy-modules = ["mipi_calc", "cli", "enrichment", "simulator"]\n\n[tool.setuptools.packages.find]
+[tool.setuptools]
+py-modules = ["mipi_calc", "cli", "enrichment", "simulator"]
+
+[tool.setuptools.packages.find]
 include = ["agents*"]
 
 [tool.pytest.ini_options]
