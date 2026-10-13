@@ -1,202 +1,85 @@
-# Mipi Mantle Cell Calculator
+# MIPI — Mantle Cell Lymphoma Prognostic Index
 
-> **Domain:** Medical Oncology & Cancer Staging Systems
-> **Reference Guidelines & Standards:** AJCC Cancer Staging Manual & NCCN Clinical Practice Guidelines
+Clinical scoring tools for mantle cell lymphoma. The browser calculator, Python module, command-line tool, and FastAPI endpoint calculate the **original MIPI**, **simplified MIPI (s-MIPI)** and, when Ki-67 is supplied, **biological MIPI (MIPI-b)**.
 
-<div align="center">
+## Browser application
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688.svg?logo=fastapi&logoColor=white)
-![Audit Trail](https://img.shields.io/badge/Audit-HMAC--SHA256_Tamper--Evident-brightgreen.svg)
-![Zero-PHI Guard](https://img.shields.io/badge/Guard-Zero--PHI_Outbound-blue.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)
+The static application is in [web/index.html](web/index.html). It runs locally in any current desktop or mobile browser without a server, account, external dependencies, or Python runtime. A GitHub Pages deployment workflow is included in `.github/workflows/pages.yml`; deployment status must be checked in the repository's Actions/Pages settings before a public URL is advertised.
 
-</div>
+The calculator does not use browser storage or send input values to a server. Avoid submitting real patient identifiers to public services.
 
----
+## Calculation
 
-## What It Does
+Inputs: age (years), ECOG performance status (0–4), WBC in **10⁹/L**, and LDH plus the laboratory LDH upper limit of normal (same units); alternatively supply LDH/ULN ratio. Optional Ki-67 is expressed as a percentage (0–100).
 
-MIPI (Mantle Cell Lymphoma Prognostic Index) calculator that computes risk scores from clinical parameters.
-Provides single-case evaluation, batch CSV processing, a FastAPI REST API, and an HMAC-SHA256 tamper-evident audit trail.
+Original MIPI:
 
-Author: Dr. Abu Suraih Sakhri
-License: MIT
+```text
+0.03535 × age + 0.6978 × [ECOG ≥ 2]
++ 1.367 × log10(LDH / LDH_ULN)
++ 0.9393 × log10(WBC × 1000)
+```
 
----
+The WBC multiplication converts 10⁹/L to 10⁶/L for the published formula. Risk groups use the **unrounded** score:
 
-## Installation
+| Index | Low | Intermediate | High |
+|---|---|---|---|
+| Original MIPI | < 5.7 | ≥ 5.7 to < 6.2 | ≥ 6.2 |
+| s-MIPI | 0–3 points | 4–5 points | 6–11 points |
+| MIPI-b | < 5.7 | ≥ 5.7 to < 6.5 | ≥ 6.5 |
+
+MIPI-b = original MIPI + 0.02142 × Ki-67(%). The simplified index assigns points by age, ECOG, LDH/ULN, and WBC using the original published strata.
+
+These are **prognostic** indices, not treatment recommendations or emergency-triage measures. External validity and risk interpretation depend on population, therapy era, and disease biology.
+
+**References:** Hoster E et al. *Blood*. 2008;111:558–565. [DOI: 10.1182/blood-2007-06-095331](https://doi.org/10.1182/blood-2007-06-095331); [MIPI and Ki-67 discussion](https://aacrjournals.org/clincancerres/article/20/20/5194/117174/New-Paradigms-in-Mantle-Cell-Lymphoma-Is-It-Time).
+
+## Local use
+
+Requires Python 3.10+. The scoring module itself uses only the standard library.
 
 ```bash
-# Clone the repository
 git clone https://github.com/abusuraihsakhri/mipi-mantle-cell-calculator.git
 cd mipi-mantle-cell-calculator
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-```
-
----
-
-## Quickstart
-
-### 1. Single Case Evaluation
-```bash
-python mipi_calc.py single --v1 12.0 --v2 4.0 --v3 2.0
-```
-
-### 2. Batch CSV Processing
-```bash
+python mipi_calc.py single --age 60 --ecog 0 --ldh 250 --ldh-uln 250 --wbc 10 --ki67 30
 python mipi_calc.py batch -i sample.csv -o results.csv
+python -m pytest -q
 ```
 
-### 3. Enterprise Supervisor CLI
-```bash
-# Run single task evaluation with multi-agent consensus
-python cli.py audit --task-id TASK-001 --primary 28.5 --secondary 14.2
+Windows activation: `.venv\Scripts\activate`. After installation, `mipi-calc` runs the same clinical CLI.
 
-# Verify HMAC audit trail integrity
-python cli.py verify-audit
+### CSV batch processing
 
-# Batch process with supervisor agents
-python cli.py batch -i sample.csv -o results.csv
-```
+A CSV requires columns `age`, `ecog`, `wbc`, and either `ldh_ratio` or both `ldh` and `ldh_uln`. `ki67` is optional; other identifier columns are retained. An invalid row is preserved with a nonempty `error` value and no invented risk score. Processing is local. Input and output paths must differ.
 
-### 4. FastAPI REST Server
+### FastAPI
+
 ```bash
 python cli.py serve --host 127.0.0.1 --port 8000
 ```
 
-API endpoints:
-- `GET /health` — Service health check
-- `GET /metrics` — Prometheus-compatible metrics
-- `POST /api/audit` — Submit a task for multi-agent evaluation
-- `POST /api/chat` — Query the supervisor chat
-- `GET /api/audit/logs` — Retrieve HMAC-verified audit trail
+`POST /api/mipi` accepts JSON such as `{"age":60,"ecog":0,"wbc":10,"ldh_ratio":1,"ki67":30}`. Validation errors return HTTP 422. Interactive schema: `http://127.0.0.1:8000/docs`.
 
-### 5. Run Simulation Benchmark
-```bash
-python simulator.py 1000
-```
+The repository also retains earlier supervisor/audit, simulation and enrichment modules for compatibility. Their arbitrary thresholds and mock-response workflow are **not MIPI calculations**, and their messages must not be interpreted as clinical conclusions. A local audit HMAC secret can be set using `AUDIT_SECRET_KEY`; in-memory audit records do not constitute durable, externally compliant logging.
 
----
+## Development and deployment
 
-## API Reference
+- `mipi_calc.py`: clinical scoring and batch processing
+- `web/index.html`: standalone JavaScript browser calculator
+- `agents/api.py`: REST interface and retained supervisor endpoints
+- `cli.py`: retained supervisor CLI and API server
+- `tests/` and `test_mipi_calc.py`: unit and regression checks
+- `.github/workflows/ci.yml`: Python CI
+- `.github/workflows/pages.yml`: static browser deployment
+- `Dockerfile`, `docker-compose.yml`: optional FastAPI hosting
 
-### `calculate_metrics(**kwargs) -> Dict[str, Any]`
+Docker Compose requires a locally configured `AUDIT_SECRET_KEY`. The browser calculator requires no Docker instance and no Pyodide.
 
-Core scoring algorithm. Accepts numeric keyword arguments and computes a weighted score.
+Supported browsers: current Chromium, Firefox and Safari variants with standard JavaScript support (no browser-specific APIs required).
 
-**Parameters:**
-- `v1`, `v2`, `v3`, ... — Numeric clinical parameters (any names accepted)
+## License
 
-**Returns:**
-```json
-{
-  "tool": "mipi-mantle-cell-calculator",
-  "score": 14.0,
-  "classification": "Moderate / Intermediate",
-  "clinical_recommendation": "Close observation or secondary evaluation",
-  "inputs_evaluated": 2
-}
-```
-
-**Classification Thresholds:**
-| Score Range | Classification | Recommendation |
-|:------------|:---------------|:---------------|
-| < 10.0 | Low / Standard | Standard monitoring |
-| 10.0 - 24.99 | Moderate / Intermediate | Close observation |
-| >= 25.0 | High / Severe | Urgent clinical intervention |
-
-### CLI Parameters
-
-| Parameter | Description | Default |
-|:----------|:------------|:--------|
-| `--v1` | Primary parameter | 10.0 |
-| `--v2` | Secondary parameter | 5.0 |
-| `--v3` | Tertiary parameter | 2.0 |
-| `-i, --input` | Input CSV file path | Required (batch) |
-| `-o, --output` | Output CSV file path | results.csv |
-
-### Input CSV Schema
-
-| Field | Description | Requirement |
-|:------|:------------|:------------|
-| `Patient_ID` | Patient identifier | Required |
-| `v1` | Primary measurement | Required |
-| `v2` | Secondary measurement | Required |
-| `v3` | Tertiary measurement | Optional |
-
----
-
-## Security Architecture
-
-* **Zero-PHI Outbound Interceptor:** Active regex inspection blocking SSNs, MRNs, phone numbers, emails, and patient identifiers from outbound content.
-* **Tamper-Evident HMAC-SHA256 Audit Trail:** Chained, cryptographically signed logs for every evaluation.
-* **Path Traversal Protection:** File path validation prevents directory traversal in batch processing.
-* **Secure Secret Management:** HMAC signing key sourced from `AUDIT_SECRET_KEY` environment variable (no hardcoded defaults).
-
----
-
-## Testing
-
-```bash
-# Run all tests
-pytest -v
-
-# Run specific test files
-pytest tests/test_mipi_calc.py -v
-pytest tests/test_mipi_mantle_cell_calculator.py -v
-pytest tests/test_enrichment.py -v
-```
-
----
-
-## Container Deployment
-
-```bash
-# Build and run with Docker Compose (requires AUDIT_SECRET_KEY in .env)
-echo "AUDIT_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" > .env
-docker compose up --build
-
-# Or use Docker directly
-docker build -t mipi-mantle-cell-calculator .
-docker run -p 8000:8000 -e AUDIT_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))') mipi-mantle-cell-calculator
-```
-
----
-
-## Project Structure
-
-```
-mipi-mantle-cell-calculator/
-├── agents/                 # Enterprise agent framework
-│   ├── __init__.py         # Package init (v3.0.0-ENTERPRISE)
-│   ├── api.py              # FastAPI REST endpoints
-│   ├── base.py             # Security, PHI guard, HMAC audit
-│   ├── learning.py         # Bayesian calibration engine
-│   ├── llm_factory.py      # LLM provider abstraction
-│   ├── metrics.py          # Prometheus metrics exporter
-│   ├── models.py           # Pydantic data models
-│   ├── streamer.py         # WebSocket telemetry broadcaster
-│   ├── supervisor.py       # Multi-agent orchestrator
-│   └── workers.py          # Specialized domain workers
-├── tests/                  # Test suite
-│   ├── test_enrichment.py
-│   ├── test_mipi_mantle_cell_calculator.py
-│   └── (test_mipi_calc.py at root)
-├── web/                    # Static web assets
-├── cli.py                  # Enterprise CLI entry point
-├── mipi_calc.py            # Core calculator CLI
-├── enrichment.py           # Enrichment feature engines
-├── simulator.py            # Load testing simulator
-├── pyproject.toml          # Python package configuration
-├── Dockerfile              # Container build
-├── docker-compose.yml      # Container orchestration
-└── sample.csv              # Example input data
-```
+MIT — see [LICENSE](LICENSE).
