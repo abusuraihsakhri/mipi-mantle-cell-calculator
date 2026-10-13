@@ -63,7 +63,7 @@ python cli.py serve --host 127.0.0.1 --port 8000
 
 `POST /api/mipi` accepts JSON such as `{"age":60,"ecog":0,"wbc":10,"ldh_ratio":1,"ki67":30}`. Validation errors return HTTP 422. Interactive schema: `http://127.0.0.1:8000/docs`.
 
-The repository also retains earlier supervisor/audit, simulation and enrichment modules for compatibility. Their arbitrary thresholds and mock-response workflow are **not MIPI calculations**, and their messages must not be interpreted as clinical conclusions. A local audit HMAC secret can be set using `AUDIT_SECRET_KEY`; in-memory audit records do not constitute durable, externally compliant logging.
+The legacy supervisor endpoints (`/api/audit`, `/api/chat`, `/api/audit/logs`) are disabled unless the server defines `AUDIT_API_TOKEN` and requests supply the matching `X-Audit-Token` header. Keep this token server-side. The repository also retains earlier supervisor/audit, simulation and enrichment modules for compatibility. Their arbitrary thresholds and mock-response workflow are **not MIPI calculations**, and their messages must not be interpreted as clinical conclusions. A local audit HMAC secret can be set using `AUDIT_SECRET_KEY`; in-memory audit records do not constitute durable, externally compliant logging.
 
 ## Development and deployment
 
