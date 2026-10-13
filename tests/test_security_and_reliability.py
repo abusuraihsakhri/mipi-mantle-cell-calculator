@@ -25,7 +25,7 @@ class TestClinicalInputs:
 
     def test_duplicate_file_path_rejected(self, tmp_path):
         path = tmp_path / "input.csv"
-        path.write_text("age,ecog,wbc,ldh_ratio\\n60,0,10,1\\n")
+        path.write_text("age,ecog,wbc,ldh_ratio\n60,0,10,1\n")
         with pytest.raises(ValueError, match="differ"):
             process_batch(str(path), str(path))
 
